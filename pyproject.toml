@@ -1,0 +1,7 @@
+[project]
+name = "drone-automation"
+version = "0.1.0"
+description = "On-site drone security analyst: local perception, short-window alert decisions, and evidence summaries."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []

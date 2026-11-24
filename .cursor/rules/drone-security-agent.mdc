@@ -1,0 +1,32 @@
+---
+description: Always load the Drone Security Analyst project skill, architecture, inventory, and test gates before coding.
+alwaysApply: true
+---
+
+# Drone Security Analyst — always-on project rule
+
+You are working in the **Drone Security Analyst** repo.
+
+## Before any code change
+
+1. Read the project skill: `.cursor/skills/drone-security-agent/SKILL.md`
+2. Read `docs/code-inventory.md` (what classes, data, and functions already exist)
+3. Align with:
+   - `FEATURES.md`
+   - `architecture-decisions/00-current-architecture.md`
+
+## Hard gates
+
+- Prefer **classes + typed data models**; keep code neat and structured.
+- Survey inventory before inventing new functions/types.
+- **Write tests with the code**, run them until they **pass**, then **run** the smoke entrypoint.
+- Update `docs/code-inventory.md` when public classes/data/functions change.
+- Architecture changes need an ADR + changelog entry under `architecture-decisions/`.
+
+## Pipeline contract
+
+`Live|Upload → ring buffer → Mirage → hourly JSON → 10s window (max 15s) → Decision 1 → popup + chunk → optional Flash alert detail (settings) → Flash hour summary → Flash dead-hand (LAST)`
+
+- Decision 1 classifies alerts; Mirage alone does not raise the popup.
+- Flash detailed alerts = frontend setting (default OFF). Hour + dead-hand Flash summaries = required.
+- Do not upload the continuous full stream. Keep continuous frame analysis on-site.
