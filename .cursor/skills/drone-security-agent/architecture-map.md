@@ -1,51 +1,51 @@
 # Architecture map (actionable)
 
-Canonical detail: `architecture-decisions/00-current-architecture.md`  
-ADRs: `001` (stack) · `002` (chunks) · `003` (Flash summaries)  
-Evolution: `architecture-decisions/changelog.md`
+Canonical detail: `docs/architecture.md`  
+Why it looks this way: `docs/design-decisions.md`
 
 ## Pipeline contract
 
 ```
-Live|Upload → ring buffer → Mirage (sampled, local) → hourly JSON log
-                          → 10s window (max 15s): video + Mirage JSON
-                          → Decision 1 → ALERT?
+Live|Upload → ring buffer → vision model (sampled, local) → hourly JSON log
+                          → 10s window (max 15s): video + vision readings
+                          → alert classifier + time rules → ALERT?
                                no → log only
-                              yes → web popup (Mirage) + save chunk
-                                    → optional Flash detailed alert (settings ON)
-                          → Flash 1-hour summary (required, hour boundary)
-                          → Flash dead-hand summary (required, LAST before phase end)
+                              yes → web popup + save chunk
+                                    → optional LLM alert write-up (setting ON)
+                          → LLM period summary (every N minutes)
+                          → LLM dead-hand summary (LAST before the session ends)
 ```
 
-## Flash rules (do not blur)
+## LLM jobs (do not blur)
 
 | Job | Required? | Trigger |
 |-----|-----------|---------|
-| Detailed alert summary | Optional (frontend setting, default OFF) | After ALERT |
-| 1-hour evidence summary | Required | Hour boundary |
-| Dead-hand final summary | Required | Video/phase end — **last work before exit** |
+| Alert write-up | Optional (session setting, default OFF) | After an alert |
+| Period summary | When LLM usage is on | Every N minutes of the session |
+| Dead-hand final summary | When LLM usage is on | Session end — **last work before exit** |
+| Chat answers | On request | Operator question |
+| Entity descriptions | Optional (advanced analytics) | New key frame with a person/vehicle/animal/package |
 
-- Popup never waits on Flash.
-- Hour / dead-hand summaries use Mirage logs + alert index with **timestamps / chunk / seek** evidence refs.
-- Prefer structured text to Flash — not a full hour of video.
+- The popup never waits on the LLM.
+- Summaries cite evidence: timestamps, chunk files, seek offsets.
+- The LLM sees the text log plus a few key frames — never full video.
 
 ## Layers → packages
 
 | Layer | Responsibility | Package | Owns data |
 |-------|----------------|---------|-----------|
-| Capture / buffer | Stream or file → deque | `pipeline/`, `ingest/` | `FramePacket`, `RingBuffer` |
-| Perception | Mirage on keyframes | `perception/` | `SceneObservation` |
-| Logging | Hourly Mirage JSON | `indexing/` / `logging/` | `HourlyMirageLog` |
-| Windowing | Pack 10–15s evidence | `pipeline/` | `DecisionWindow` |
-| Gate | Decision 1 alert classify | `decisions/` | `GateResult` |
-| Alert UX | Web popup | `ui/` / `alerts/` | `AlertNotification` |
+| Capture / buffer | Stream or file → ring buffer | `ingest/`, `pipeline/` | `FramePacket`, `RingBuffer` |
+| Perception | Vision model on the newest frame | `perception/` | `SceneObservation` |
+| Logging | Hourly observation JSON | `indexing/` | `HourlyObservationLog` |
+| Windowing | Pack 10–15 s evidence | `pipeline/` | `DecisionWindow` |
+| Gate | Alert classifier + time rules | `decisions/` | `GateResult`, `RuleHit` |
 | Commit | mp4 + paired json | `indexing/` | `ChunkArtifact` |
-| Flash | Optional alert detail + hour/dead-hand | `agent/` / `summaries/` | `AlertDetailSummary`, `HourSummary`, `FinalSummary` |
-| Settings | Frontend toggles | `ui/` + config | `AppSettings.detailed_alert_summaries` |
+| Summaries / chat / analytics | LLM graphs | `agent/` | `LlmSummary`, `ChatTurn`, `EntitySighting` |
+| Memory | Graph index | `indexing/` | `IndexedFrame`, `HourDigest` |
+| Cost | Usage ledger | `agent/metering.py`, `indexing/` | `UsageRecord`, `SessionCost` |
 
 ## Changing the architecture
 
-1. ADR under `architecture-decisions/adrs/`
-2. Update `00-current-architecture.md`
-3. Changelog entry (newest first)
-4. Align `FEATURES.md` if user-facing behavior changes
+1. Add an entry to `docs/design-decisions.md`
+2. Update `docs/architecture.md`
+3. Align `FEATURES.md` if user-facing behavior changes

@@ -46,9 +46,9 @@ Copy into `docs/code-inventory.md` and keep updated. Agents must read this befor
 
 ## Intentionally not built yet
 
-- Perception Mirage client
-- Decision 1 client
-- Flash / LangChain agent
+- Perception (vision model) adapter
+- Alert classifier client
+- LLM summarizer
 - SQLite (or other) index
 - Full pipeline orchestrator
 ```

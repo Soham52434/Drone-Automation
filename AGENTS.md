@@ -6,7 +6,7 @@ Instructions for AI coding agents working in this repository.
 
 1. `.cursor/skills/drone-security-agent/SKILL.md` — **primary project skill**
 2. `docs/code-inventory.md` — existing classes, data models, functions
-3. `architecture-decisions/00-current-architecture.md` — current plan
+3. `docs/architecture.md` — current design
 4. `FEATURES.md` — product outcomes
 
 Skill references (read as needed):
@@ -24,6 +24,6 @@ survey inventory → implement neat classes/data → update inventory → write 
 
 ## Architecture reminder
 
-Live/upload → ring buffer → Mirage (hourly JSON) → **10s window (max 15s)** → Decision 1 → on ALERT: Mirage web popup + chunk save → optional Flash detailed alert (**settings**, default OFF) → required Flash **1-hour** summary → required Flash **dead-hand** summary as **last work** before video/phase end.
+Live/upload → ring buffer → local vision model (hourly JSON) → **10s window (max 15s)** → alert classifier + time rules → on ALERT: web popup + chunk save → optional LLM alert write-up (**setting**, default OFF) → LLM **period** summaries → LLM **dead-hand** summary as the **last work** before the session ends.
 
-Design evolution: `architecture-decisions/` (ADR-002 chunks, ADR-003 Flash).
+Why the design looks this way: `docs/design-decisions.md`.

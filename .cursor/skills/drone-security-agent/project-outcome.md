@@ -7,33 +7,29 @@ A working **Drone Security Analyst Agent** prototype for a docked drone monitori
 | Outcome | Evidence |
 |---------|----------|
 | Ingests video | Live stream or uploaded file through one orchestrator + ring buffer |
-| Sees the scene | Mirage on sampled frames returns structured JSON with timestamps |
-| Hourly trail | Mirage outputs appended to hour-scoped JSON logs always |
-| Decides | Decision 1 on ~10s window (max 15s: video + Mirage JSON) → ALERT or not |
-| Alerts | Web popup shows Mirage output only when Decision 1 says ALERT |
+| Sees the scene | Local vision model on sampled frames returns structured JSON with timestamps and classes |
+| Hourly trail | Every reading appended to hour-scoped JSON logs |
+| Decides | Alert classifier on a ~10s window (max 15s: video + readings) plus time rules → ALERT or not |
+| Alerts | Web popup only when the gate says ALERT |
 | Evidence clips | Paired `chunk_*.mp4` + `.json` with `seek_offset_sec`; debounced |
-| Remembers | Events queryable by time and object type |
-| Optional detailed alert | Flash richer alert text only if frontend setting ON (default OFF) |
-| Hour summary | Flash 1-hour summary with evidence timestamps |
-| Dead hand | Flash final summary is last job before video/phase end |
+| Remembers | Readings queryable by time and object class (graph index + chat) |
+| Telemetry | Per-class activity and a tagged log, from class tags |
+| Summaries | LLM period summaries with evidence timestamps; dead-hand final summary last |
+| Cost | Requests, tokens, and cost per session |
 
-Privacy outcome: continuous frame **analysis** on-site; cloud used sparsely for decision/report helpers (see architecture).
+Privacy outcome: continuous frame **analysis** on-site; the cloud sees short decision clips and a few key frames.
 
 ## Ship checklist
 
-- [ ] Feature list — see `FEATURES.md`
-- [ ] Architecture docs — see `architecture-decisions/`
-- [ ] Runnable Python prototype
-- [ ] Indexing with query examples
-- [ ] Automated tests
-- [ ] README: setup, run, and design
+- [x] Feature list — `FEATURES.md`
+- [x] Architecture and design docs — `docs/`
+- [x] Runnable prototype
+- [x] Indexing with query examples
+- [x] Automated tests
+- [ ] README with screenshots and demo video
+- [ ] Report
 
-## Bonus outcomes (if time)
-
-- [ ] One-sentence video/day summary
-- [ ] Follow-up Q&A over indexed events
-
-## Engineering outcome (every PR / agent turn)
+## Engineering outcome (every change)
 
 - Neat modules with clear classes and data models
 - `docs/code-inventory.md` current

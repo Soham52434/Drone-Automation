@@ -13,7 +13,7 @@ You are working in the **Drone Security Analyst** repo.
 2. Read `docs/code-inventory.md` (what classes, data, and functions already exist)
 3. Align with:
    - `FEATURES.md`
-   - `architecture-decisions/00-current-architecture.md`
+   - `docs/architecture.md`
 
 ## Hard gates
 
@@ -21,12 +21,12 @@ You are working in the **Drone Security Analyst** repo.
 - Survey inventory before inventing new functions/types.
 - **Write tests with the code**, run them until they **pass**, then **run** the smoke entrypoint.
 - Update `docs/code-inventory.md` when public classes/data/functions change.
-- Architecture changes need an ADR + changelog entry under `architecture-decisions/`.
+- Architecture changes need an entry in `docs/design-decisions.md` and an update to `docs/architecture.md`.
 
 ## Pipeline contract
 
-`Live|Upload → ring buffer → Mirage → hourly JSON → 10s window (max 15s) → Decision 1 → popup + chunk → optional Flash alert detail (settings) → Flash hour summary → Flash dead-hand (LAST)`
+`Live|Upload → ring buffer → vision model (local) → hourly JSON → 10s window (max 15s) → alert classifier + time rules → popup + chunk → optional LLM alert write-up (setting) → LLM period summary → LLM dead-hand summary (LAST)`
 
-- Decision 1 classifies alerts; Mirage alone does not raise the popup.
-- Flash detailed alerts = frontend setting (default OFF). Hour + dead-hand Flash summaries = required.
-- Do not upload the continuous full stream. Keep continuous frame analysis on-site.
+- The alert classifier and the time rules raise alerts; the vision model alone never raises the popup.
+- LLM alert write-ups are a per-session setting (default OFF). Period and dead-hand summaries run whenever LLM usage is on.
+- Never upload the continuous full stream. Frame analysis stays on-site.

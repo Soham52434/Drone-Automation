@@ -9,6 +9,16 @@ wheels/
 # Virtual environments
 .venv
 
+# Runtime data (sessions, uploaded videos, saved chunks, SQLite)
+data/
+
+# Local vision-model weights (downloaded on first server start)
+/models/
+
+# Frontend
+web/node_modules/
+web/dist/
+
 # Secrets and local credentials
 .env
 .env.*
@@ -24,3 +34,6 @@ ASSIGNMENT.md
 *Assignment*.pdf
 research_notes/
 reports/
+
+# Local agent settings
+.claude/settings.local.json

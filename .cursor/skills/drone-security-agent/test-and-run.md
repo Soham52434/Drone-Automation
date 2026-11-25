@@ -10,34 +10,38 @@ Do not mark a coding task complete if any of these failed.
 | Change type | Minimum tests |
 |-------------|----------------|
 | New data model | Construction / validation / immutability as relevant |
-| Perception adapter | Returns `SceneObservation` shape (mock Mirage if needed) |
+| Perception adapter | Returns `SceneObservation` shape (fake vision model) |
 | Decision gate | Worth-reporting true/false; rule firing; confidence handling |
 | Indexing | Insert + query by time; query by object |
 | Pipeline | End-to-end with fakes: boring frame skips LLM; alert frame calls agent |
-| Agent / Flash | Prompt/tool wiring with mocked client |
+| LLM graphs | Prompt wiring with a fake chat model |
 
 Always include at least one **negative** case (should not alert / should not call LLM).
 
 ## How to run (repo defaults)
 
-Prefer project tooling when present (`uv`, `pytest`):
+Backend (from repo root):
 
 ```bash
-cd /home/soham-jagtap/Desktop/OA
-# activate or use uv
 uv run pytest -q
-# or
-.venv/bin/python -m pytest -q
 ```
 
-If pytest is not installed yet, add it as a dev dependency before claiming test coverage.
-
-Smoke after green tests:
+Frontend (when `web/` changes):
 
 ```bash
-uv run python main.py
-# later: uv run python -m drone_security ...
+cd web && npm test && npm run build
 ```
+
+Smoke after green tests — start the server on a scratch data dir and hit the API:
+
+```bash
+DRONE_DATA_DIR=/tmp/drone-smoke uv run python main.py --port 8765 &
+curl -s http://127.0.0.1:8765/api/health
+# exercise the changed endpoint(s), e.g. upload a video then POST /api/sessions/{id}/chunks
+pkill -f "main.py --port 8765"
+```
+
+`tests/conftest.py::write_test_video` generates a sample mp4 for smoke uploads.
 
 ## Agent behavior on failure
 
@@ -48,9 +52,9 @@ uv run python main.py
 
 ## Test doubles
 
-- External Mirage / Decision 1 / Flash **must** be mockable.
+- The vision model, alert classifier, and LLM **must** be replaceable by fakes.
 - Default unit tests do **not** require live API keys.
-- Optional marked integration tests may call live APIs when the user asks.
+- Live API calls are never part of the default suite.
 
 ## Definition of “passed”
 

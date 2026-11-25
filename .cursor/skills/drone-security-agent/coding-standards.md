@@ -62,13 +62,13 @@ class DecisionGate:
 ## Module rules
 
 - `models/`: pure data — no I/O, no API clients.
-- `*_client.py` / adapters: wrap Mirage, Decision 1, Flash; convert to/from models at the edge.
+- Adapters wrap the vision model, alert classifier, and LLM; convert to/from models at the edge.
 - `pipeline/`: orchestration only — no embedding vendor SDKs deeply.
 - Tests may use fakes implementing the same class interfaces.
 
 ## Style
 
-- Python 3.11+
+- Python 3.12+
 - Type hints on public APIs
 - No dead code or commented-out blocks left behind
 - Keep files focused; split when a file mixes unrelated layers
@@ -76,6 +76,6 @@ class DecisionGate:
 
 ## Forbidden for v1
 
-- Calling Flash/VLM inside a tight “every frame” loop without the gate
-- Dumping Mirage JSON through the stack as untyped `dict` at every layer
-- Giant `main.py` with all logic inline (thin entrypoint only)
+- Calling the LLM inside a tight “every frame” loop
+- Passing raw vision-model JSON through the stack as untyped `dict` at every layer
+- Business logic inside `main.py`: it holds the FastAPI app and routes, and each route only calls a class method (e.g. `SessionManager`) and maps to a schema

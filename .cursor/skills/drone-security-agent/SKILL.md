@@ -1,7 +1,7 @@
 ---
 name: drone-security-agent
 description: >-
-  Project guide for the Drone Security Analyst (Mirage → Decision 1 → Flash).
+  Project guide for the Drone Security Analyst (local vision model → alert classifier → LLM summarizer).
   Enforces architecture, class/data neatness, code inventory, and the
   write-tests → pass-tests → run gate. Use for any coding, refactor, test, architecture,
   feature, or agent work in this repo.
@@ -18,8 +18,8 @@ Before writing or editing code, **read these files in order** (skip only if alre
 3. [architecture-map.md](architecture-map.md) — pipeline contract
 4. Root sources of truth:
    - `FEATURES.md`
-   - `architecture-decisions/00-current-architecture.md`
-   - `architecture-decisions/changelog.md` (if changing design)
+   - `docs/architecture.md`
+   - `docs/design-decisions.md` (if changing design)
 5. `docs/code-inventory.md` — **what already exists** (classes, data, functions)
 6. [coding-standards.md](coding-standards.md) + [test-and-run.md](test-and-run.md)
 
@@ -36,42 +36,37 @@ Code change → update inventory → write/update tests → tests PASS → run t
 1. **No untested code paths** for new behavior.
 2. **No “tests later”** — write tests in the same change.
 3. **Tests must pass** before finishing the turn.
-4. **Run** the affected CLI/module after tests (smoke check).
+4. **Run** the affected entrypoint after tests (smoke check).
 5. **Update `docs/code-inventory.md`** whenever you add/rename/remove a class, dataclass, or public function.
-6. Prefer **classes + typed data models** over scattered dicts/scripts. Keep neat structure.
+6. Prefer **classes + typed data models** over scattered dicts/scripts.
 
 Fail any gate → fix before adding features.
 
 ---
 
-## Architecture contract (do not violate without ADR)
-
-Pipeline:
+## Architecture contract (change only with a design-decision entry)
 
 ```
-Live|Upload → ring buffer → Mirage (sampled, local) → hourly JSON log
-                          → 10s window (max 15s): video + Mirage JSON
-                          → Decision 1 (ALERT?) → popup + save chunk
-                          → optional Flash detailed alert (settings toggle)
-                          → Flash 1-hour summary (required)
-                          → Flash dead-hand summary (required, LAST before phase end)
+Live|Upload → ring buffer → vision model (sampled, local) → hourly JSON log
+                          → 10s window (max 15s): video + vision readings
+                          → alert classifier + time rules (ALERT?) → popup + save chunk
+                          → optional LLM alert write-up (session setting)
+                          → LLM period summary (every N minutes)
+                          → LLM dead-hand summary (LAST before the session ends)
 ```
 
-- Mirage analyzes sampled frames **on-site**; it does **not** raise the web popup alone.
-- Decision 1 classifies **ALERT vs NOT ALERT** on a **10s window (max 15s)**.
-- On alert: web popup (Mirage output) + paired `chunk_*.mp4` / `.json` + debounce.
-- Flash detailed alert summaries are **optional** (frontend setting, default OFF).
-- Flash **1-hour** and **dead-hand** summaries are **required**; dead hand is the last job before a video/phase ends.
+- The vision model analyzes sampled frames **on-site**; it never raises the web popup alone.
+- The alert classifier decides **ALERT vs NOT ALERT** on a **10s window (max 15s)**; the after-hours and loitering rules can also alert.
+- On alert: web popup + paired `chunk_*.mp4` / `.json` + debounce.
+- Every model call runs through a LangGraph (`src/drone_security/graphs.py`).
 - No continuous full-stream cloud upload.
-- Design changes → new ADR under `architecture-decisions/adrs/` + changelog entry.
+- Design changes → entry in `docs/design-decisions.md` + update `docs/architecture.md`.
 
 Details: [architecture-map.md](architecture-map.md)
 
 ---
 
 ## Coding workflow (agent loop)
-
-Copy and track:
 
 ```
 Task Progress:
@@ -85,9 +80,7 @@ Task Progress:
 - [ ] 8. Confirm FEATURES still aligned
 ```
 
-### Step 1 — Survey before inventing
-
-Ask and answer from inventory + codebase:
+### Survey before inventing
 
 - What **classes** already own this responsibility?
 - What **data models** already exist?
@@ -95,66 +88,38 @@ Ask and answer from inventory + codebase:
 
 Extend existing types. Do not duplicate parallel dict shapes.
 
-### Step 2 — Structure
-
-Default layout (create as needed):
+### Layout
 
 ```
 src/drone_security/
-  models/          # dataclasses / pydantic models only
-  perception/      # Mirage adapters
-  decisions/       # Decision 1 + local rules
-  agent/           # Flash / LangChain agent
-  indexing/        # frame/event store + query
+  models/          # dataclasses only
+  ingest/          # frame sources: ring buffer, video file, WebRTC
+  perception/      # local vision-model adapter + perception graph
+  decisions/       # alert classifier graph + time rules
+  agent/           # LLM graphs: summaries, chat, entity descriptions; metering
+  indexing/        # SQLite, graph index, logs, archives, usage ledger
   pipeline/        # orchestration
-  telemetry/       # telemetry types + join
+  telemetry/       # telemetry from class tags
 tests/
 docs/code-inventory.md
 ```
 
-Rules: [coding-standards.md](coding-standards.md)
-
-### Step 3 — Test + run
-
-Follow [test-and-run.md](test-and-run.md). Typical commands (adjust when project matures):
-
-```bash
-# from repo root, with project venv
-python -m pytest -q
-python -m drone_security  # or: uv run python main.py / documented CLI
-```
+Rules: [coding-standards.md](coding-standards.md). Test and run: [test-and-run.md](test-and-run.md).
 
 ---
 
-## Project outcome (north star)
+## When asked for a feature
 
-Ship a private-repo prototype that:
-
-- Simulates telemetry + frames
-- Perceives with Mirage (structured)
-- Gates with Decision 1 (“worth reporting?”)
-- Calls Flash LLM only when needed
-- Logs events, raises alerts, indexes/query by time or object
-- Has passing tests, README, design docs, voiceover demo, PDF report
-
-Full checklist: [project-outcome.md](project-outcome.md)
-
----
-
-## When the user asks for a feature
-
-1. Map feature → `FEATURES.md` item + pipeline layer.
-2. Implement through existing classes/data when possible.
-3. Add ADR only if architecture changes.
+1. Map it to a `FEATURES.md` item and a pipeline layer.
+2. Implement through existing classes/data where possible.
+3. Record a design decision only if the architecture changes.
 4. Close with: tests passed + command run + inventory updated.
-
----
 
 ## Anti-patterns
 
 - One-off scripts that bypass models/pipeline
 - Passing raw untyped dicts across layers
-- Calling Flash/VLM on every frame
+- Calling the LLM on every frame
 - Claiming done without green tests
-- Editing architecture without changelog/ADR
+- Changing the architecture without updating the design docs
 - Ignoring `docs/code-inventory.md`

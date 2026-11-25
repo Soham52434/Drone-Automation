@@ -3,5 +3,39 @@ name = "drone-automation"
 version = "0.1.0"
 description = "On-site drone security analyst: local perception, short-window alert decisions, and evidence summaries."
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "aiortc>=1.16.0",
+    "av>=18.1.1",
+    "cactus-compute>=4.2.7",
+    "falkordblite>=0.12.1",
+    "fastapi>=0.165.0",
+    "langchain-google-genai>=4.5.0",
+    "langgraph>=1.2.24",
+    "numpy>=2.4.6",
+    "pillow>=13.0.0",
+    "psutil>=7.2.2",
+    "python-multipart>=0.0.34",
+    "redis>=8.2.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/drone_security"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.2",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+]
