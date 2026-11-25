@@ -33,6 +33,11 @@ The main choices behind the prototype: what was decided, why, and what was weigh
 
 **Why.** A fixed stride (say, every 250 ms) on a machine that needs 4 s per frame builds a growing backlog, and the analysis drifts minutes behind the video. Taking the newest frame keeps the system at the live moment, and a faster machine samples more often.
 
+**Making it hold on real footage.** Three things keep the vision model the only bottleneck:
+- Uploads are read like a video player: the decoder stays open, and a keyframe index (built from packet headers) lets the playhead jump instead of decoding every frame. Only the sampled frame is converted. On 4K footage this cut a playhead move from up to 25 s to about 0.2 s.
+- Decisions run in a background queue, in window order, so encoding a clip and waiting for the classifier never pause the readings.
+- The classifier's clip is 5 fps, which is enough to see motion.
+
 ## 4. Ten-second decision windows, pinned until the clip is saved
 
 **Decision.**

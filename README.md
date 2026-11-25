@@ -109,8 +109,8 @@ Set these in `.env` (copy `.env.example`). Never commit `.env`.
 ## Tests
 
 ```bash
-uv run pytest -q                       # 206 backend tests
-cd web && npm test && npm run build    # 64 frontend tests, typecheck, build
+uv run pytest -q                       # 216 backend tests
+cd web && npm test && npm run build    # 65 frontend tests, typecheck, build
 ```
 
 No API key, GPU, or camera is needed: models are replaced by fakes and test videos are generated. The brief's own examples ("alert triggered at midnight", "person loitering", "truck logged correctly", "blue Ford F150 entered twice") are named tests. See [docs/testing.md](docs/testing.md).
@@ -133,18 +133,6 @@ tests/                   pytest suite
 docs/                    architecture, design decisions, testing, code inventory
 ```
 
-## How AI tools were used
+## Design decisions and AI-assisted development
 
-The project was built with AI coding assistants inside a fixed engineering loop.
-
-- **Cursor** held the project's rules and skill (`.cursor/`): the pipeline contract, coding standards, and a definition of done. These made every change follow the same loop: survey the code inventory, implement typed classes, update the inventory, write tests, get them passing, run a smoke test.
-- **Claude Code** used the same skill (`CLAUDE.md`, `AGENTS.md`, `.claude/`). It handled most of the implementation, refactors, tests, and documentation, including browser screenshots to check the UI on desktop and phone sizes.
-- **What worked:** writing the rules down once. A typed-model-first codebase plus `docs/code-inventory.md` let the assistant extend existing classes instead of inventing parallel ones. The test gate caught regressions from large refactors, such as renaming every model reference to a role name across 50+ files.
-- **What needed a human:** product calls, such as dropping simulated flight telemetry because it contradicted the video, making LLM features opt-in per session, and choosing which brief examples to turn into tests. Prices and rate limits were checked against the provider's pages rather than taken from memory.
-
-## Limitations
-
-- Drone position and altitude are not modelled; telemetry is derived from what the camera sees. See [design decision 12](docs/design-decisions.md#12-telemetry-from-class-tags-not-simulated-flight-data).
-- Short clips and a few still frames go to hosted models, so this is hybrid, not air-gapped.
-- Repeat-visit counting matches descriptions; two identical vehicles count as one.
-- Paused chat questions are lost when the server restarts.
+Why the system is built this way: [docs/design-decisions.md](docs/design-decisions.md). Model choices, assumptions, results, future research, and how AI tools were used are covered in the submitted report.

@@ -130,3 +130,29 @@ def test_summaries_endpoint_is_empty_for_a_new_session(client: TestClient):
     created = client.post("/api/sessions/live", json={}).json()
     assert client.get(f"/api/sessions/{created['id']}/summaries").json() == []
     assert client.get("/api/sessions/missing/summaries").status_code == 404
+
+
+def test_mov_upload_is_accepted_and_served_as_mp4(tmp_path):
+    import shutil
+    import subprocess
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is needed to write a .mov file")
+
+    from drone_security.config import AppConfig
+    from main import create_app
+
+    mov = tmp_path / "DJI_0001.MOV"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=15:duration=3",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mov", str(mov)],
+        check=True,
+    )
+    with TestClient(create_app(AppConfig(data_dir=tmp_path / "data"))) as client:
+        with mov.open("rb") as data:
+            response = client.post("/api/sessions/upload", files={"file": ("DJI_0001.MOV", data, "video/quicktime")})
+        assert response.status_code == 201, response.text
+        session = response.json()
+        assert session["duration_ms"] == 3000
+        source = client.get(session["source_url"])
+        assert source.status_code == 200 and source.headers["content-type"] == "video/mp4"

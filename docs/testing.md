@@ -1,6 +1,6 @@
 # Testing
 
-Two suites: 206 backend tests (pytest) and 64 frontend tests (Vitest). Neither needs an API key, a GPU, or a camera. Every model is replaced by a fake with the same interface, and test videos are generated on the fly.
+Two suites: 216 backend tests (pytest) and 65 frontend tests (Vitest). Neither needs an API key, a GPU, or a camera. Every model is replaced by a fake with the same interface, and test videos are generated on the fly.
 
 ## Run
 

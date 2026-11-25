@@ -206,7 +206,9 @@ async def session_events(request: Request, session_id: str) -> StreamingResponse
 
 @router.get("/sessions/{session_id}/source")
 def source_video(request: Request, session_id: str) -> FileResponse:
-    return FileResponse(_manager(request).source_path(session_id))
+    path = _manager(request).source_path(session_id)
+    # Browsers play QuickTime (.mov) files with H.264 inside when they are served as MP4.
+    return FileResponse(path, media_type="video/mp4" if path.suffix.lower() in {".mov", ".m4v"} else None)
 
 
 @router.get("/sessions/{session_id}/keyframes/{file_name}")
@@ -288,6 +290,9 @@ def create_app(
     return app
 
 
+SHUTDOWN_GRACE_SECONDS = 3
+
+
 def _load_dotenv(path: Path) -> None:
     if not path.is_file():
         return
@@ -305,7 +310,13 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
-    uvicorn.run(create_app(web_dist=WEB_DIST, load_models=True), host=args.host, port=args.port)
+    uvicorn.run(
+        create_app(web_dist=WEB_DIST, load_models=True),
+        host=args.host,
+        port=args.port,
+        # Browsers keep event streams open forever; without a limit, Ctrl+C would wait on them indefinitely.
+        timeout_graceful_shutdown=SHUTDOWN_GRACE_SECONDS,
+    )
 
 
 if __name__ == "__main__":

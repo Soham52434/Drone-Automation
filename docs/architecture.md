@@ -19,7 +19,7 @@ Live camera (WebRTC)  or  uploaded video
         │
         ▼
 Ring buffer (15 s, in memory, ≤640 px, ≤15 fps)   ← no continuous recording
-        │  newest frame when the vision model is free
+        │  newest frame when the vision model is free (uploads: a forward reader that jumps keyframes)
         ▼
 Vision model (local) ──► perception graph: describe → map_observation → classify_objects
         │                 reading = objects → classes (person, vehicle, …) + scene
@@ -28,7 +28,8 @@ Vision model (local) ──► perception graph: describe → map_observation �
         ├──► key frames           (LLM on) a few JPEGs of notable readings
         │
         ▼ every 10 s of timeline (hard max 15 s)
-Decision window: re-encoded clip + the window's readings + time of day + who is lingering
+Decision window: 5 fps clip + the window's readings + time of day + who is lingering
+        │  (judged in a background queue: the vision model never waits; the window open at the end is judged too)
         │
         ▼
 Alert graph: classify (alert classifier) → apply_time_rules (after hours, loitering) → alert | clear

@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import shutil
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -44,7 +46,10 @@ from drone_security.pipeline.presence import PresenceTracker, window_context
 from drone_security.pipeline.summary_schedule import SessionEvidence, SummaryScheduler
 
 SaveClip = Callable[..., Awaitable[ChunkArtifact]]
+logger = logging.getLogger(__name__)
+
 _RECENT_LIMIT = 100
+LOW_DISK_MB = 1024
 _STATS_INTERVAL_SECONDS = 1.0
 
 
@@ -91,6 +96,10 @@ class SessionAnalysis:
         self._subscribers: dict[str, list[asyncio.Queue[AnalysisEvent]]] = {}
         self._recent: dict[str, list[AnalysisEvent]] = {}
         self._commits: set[asyncio.Task[None]] = set()
+        # Per session: decisions run one at a time, in window order, without blocking perception.
+        self._decision_chain: dict[str, asyncio.Task[None]] = {}
+        self._clip_interval_ms = max(1, int(1000 / config.decision_clip_fps))
+        self._session_tasks: dict[str, set[asyncio.Task[None]]] = {}
         self._briefs: dict[str, str] = {}
         self._summarizer = summarizer or LangGraphSummarizer(None, unavailable_reason="GOOGLE_API_KEY is not set")
         self._summary_sessions: dict[str, _SummarySession] = {}
@@ -161,6 +170,9 @@ class SessionAnalysis:
         stats_task = self._stats_tasks.pop(session_id, None)
         if stats_task is not None:
             stats_task.cancel()
+        for pending in list(self._session_tasks.pop(session_id, ())):
+            pending.cancel()
+        self._decision_chain.pop(session_id, None)
         self._streams.pop(session_id, None)
         self._analyzers.pop(session_id, None)
         self._presence.pop(session_id, None)
@@ -194,16 +206,20 @@ class SessionAnalysis:
         duration = session.duration_ms or 0
         clock: WallClock | StepClock = WallClock() if self._pace else StepClock(self._fast_step_ms)
         self._publish(StatusEvent(session.id, "playing", "Sampling the video at the current moment"))
+        self._warn_if_disk_low(session.id)
         last_frame_ms: int | None = None
+        reader = source.playback()
         try:
             while True:
                 now_ms = clock.now_ms()
                 if now_ms >= duration:
                     break
-                packet = await asyncio.to_thread(source.frame_at, now_ms)
+                packet = await asyncio.to_thread(reader.frame_at, now_ms)
                 if packet is None:
                     break
                 if last_frame_ms is not None and packet.timestamp_ms <= last_frame_ms:
+                    if reader.exhausted:
+                        break  # the file holds no more frames, whatever its header says
                     if isinstance(clock, StepClock):
                         clock.advance()
                         continue
@@ -213,18 +229,28 @@ class SessionAnalysis:
                 last_frame_ms = packet.timestamp_ms
                 if isinstance(clock, StepClock):
                     clock.advance()
+            await self._decide_remaining(session.id, stream, source, last_frame_ms)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._publish(ErrorEvent(session.id, str(exc)))
+            logger.exception("Analysis of session %s stopped", session.id)
+            self._publish(ErrorEvent(session.id, f"Analysis stopped: {exc or exc.__class__.__name__}"))
+            await self._drain(session.id)
             await self._dead_hand(session.id)
         else:
-            if self._commits:
-                await asyncio.gather(*list(self._commits), return_exceptions=True)
+            await self._drain(session.id)
             await self._dead_hand(session.id)
         finally:
+            await asyncio.to_thread(reader.close)
             self._mark(session.id, SessionStatus.ENDED)
             self._publish(StatusEvent(session.id, "ended", "Video analysis finished"))
+
+    def _warn_if_disk_low(self, session_id: str) -> None:
+        free_mb = shutil.disk_usage(self._config.data_dir).free // (1024 * 1024)
+        if free_mb < LOW_DISK_MB:
+            self._publish(
+                ErrorEvent(session_id, f"Low disk space: {free_mb} MB free. Logs, clips, and the index may fail to save.")
+            )
 
     async def _push_stats(self, session_id: str, stream: StreamSession, slot: LatestFrame) -> None:
         """Buffer readout for the live badge, pushed instead of polled. Stops with the feed."""
@@ -237,21 +263,26 @@ class SessionAnalysis:
 
     async def _consume_live(self, session_id: str, slot: LatestFrame) -> None:
         stream = self._streams[session_id]
+        last_ms: int | None = None
         self._publish(StatusEvent(session_id, "live", "The vision model is watching the camera stream"))
+        self._warn_if_disk_low(session_id)
         try:
             while True:
                 packet = await slot.next_unseen()
                 if packet is None:
                     break
                 await self._observe(session_id, stream, packet, source=None)
+                last_ms = packet.timestamp_ms
+            await self._decide_remaining(session_id, stream, None, last_ms)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._publish(ErrorEvent(session_id, str(exc)))
+            logger.exception("Live analysis of session %s stopped", session_id)
+            self._publish(ErrorEvent(session_id, f"Analysis stopped: {exc or exc.__class__.__name__}"))
+            await self._drain(session_id)
             await self._dead_hand(session_id)
         else:
-            if self._commits:
-                await asyncio.gather(*list(self._commits), return_exceptions=True)
+            await self._drain(session_id)
             await self._dead_hand(session_id)
         finally:
             self._publish(StatusEvent(session_id, "ended", "Live stream ended"))
@@ -275,12 +306,19 @@ class SessionAnalysis:
             await self._index_observation(session_id, observation)
             analyzer.record(observation)
             self._presence[session_id].record(observation)
-            self._logs[session_id].append(observation)
             self._publish(ObservationEvent(session_id, observation))
+            try:
+                await asyncio.to_thread(self._logs[session_id].append, observation)
+            except OSError as exc:  # e.g. disk full: keep watching, report it
+                self._publish(ErrorEvent(session_id, f"Could not write the hourly log: {exc}"))
             llm_state = self._summary_sessions.get(session_id)
             if llm_state is not None:
                 llm_state.evidence.record(observation)
-                keyframe = await asyncio.to_thread(llm_state.keyframes.offer, packet, observation)
+                try:
+                    keyframe = await asyncio.to_thread(llm_state.keyframes.offer, packet, observation)
+                except OSError as exc:
+                    keyframe = None
+                    self._publish(ErrorEvent(session_id, f"Could not save a key frame: {exc}"))
                 if keyframe is not None:
                     llm_state.evidence.add_keyframe(keyframe)
                     self._maybe_describe(session_id, llm_state, keyframe, observation)
@@ -293,9 +331,63 @@ class SessionAnalysis:
                 stream.hold_from(analyzer.window_start - self._pre_ms)
             hold_ms = window.start_ms - self._pre_ms
             if window.observations:
-                await self._decide(session_id, stream, window, source, hold_ms)
+                self._queue_decision(session_id, stream, window, source, hold_ms)
             else:
                 stream.release_hold(hold_ms)
+
+    async def _decide_remaining(
+        self, session_id: str, stream: StreamSession, source: VideoFileSource | None, last_ms: int | None
+    ) -> None:
+        """The window still open when the video or feed ends is judged too, so the last seconds can alert."""
+        if last_ms is None:
+            return
+        window = self._analyzers[session_id].close_remaining(last_ms)
+        if window is not None:
+            self._queue_decision(session_id, stream, window, source, window.start_ms - self._pre_ms)
+        await self._drain(session_id)
+
+    def _queue_decision(
+        self,
+        session_id: str,
+        stream: StreamSession,
+        window: DecisionWindow,
+        source: VideoFileSource | None,
+        hold_ms: int,
+    ) -> None:
+        """Judge this window in the background, after the session's earlier windows, so the vision
+        model keeps reading frames while the clip is encoded and the classifier answers."""
+        window = replace(
+            window,
+            context=window_context(
+                self._rules,
+                live=self._kinds.get(session_id) is SessionKind.LIVE,
+                end_ms=window.end_ms,
+                observations=window.observations,
+                tracker=self._presence[session_id],
+            ),
+        )
+        previous = self._decision_chain.get(session_id)
+
+        async def run() -> None:
+            if previous is not None:
+                await asyncio.gather(previous, return_exceptions=True)
+            await self._decide(session_id, stream, window, source, hold_ms)
+
+        task = asyncio.create_task(run())
+        self._decision_chain[session_id] = task
+        self._track(session_id, task)
+
+    def _track(self, session_id: str, task: asyncio.Task[None]) -> None:
+        self._commits.add(task)
+        task.add_done_callback(self._commits.discard)
+        tasks = self._session_tasks.setdefault(session_id, set())
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    async def _drain(self, session_id: str) -> None:
+        """Wait for this session's queued decisions and the alert saves they start."""
+        while tasks := [t for t in self._session_tasks.get(session_id, ()) if not t.done()]:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _decide(
         self,
@@ -306,33 +398,24 @@ class SessionAnalysis:
         hold_ms: int,
     ) -> None:
         if source is not None:
-            interval = max(1, int(1000 / self._config.max_buffer_fps))
-            frames = await asyncio.to_thread(source.window_frames, window.start_ms, window.end_ms, interval)
+            frames = await asyncio.to_thread(source.window_frames, window.start_ms, window.end_ms, self._clip_interval_ms)
         else:
-            frames = stream.frames_between(window.start_ms, window.end_ms)
+            frames = _thin(stream.frames_between(window.start_ms, window.end_ms), self._clip_interval_ms)
         video = await asyncio.to_thread(self._encode, frames) if len(frames) >= 2 else None
-        context = window_context(
-            self._rules,
-            live=self._kinds.get(session_id) is SessionKind.LIVE,
-            end_ms=window.end_ms,
-            observations=window.observations,
-            tracker=self._presence[session_id],
-        )
-        window = replace(window, video=video if video is not None else window.video, context=context)
+        window = replace(window, video=video if video is not None else window.video)
         try:
             with metered_session(session_id):
                 result = await asyncio.to_thread(self._gate.evaluate, window, self._briefs.get(session_id, ""))  # type: ignore[attr-defined]
         except Exception as exc:
             stream.release_hold(hold_ms)
-            self._publish(ErrorEvent(session_id, f"The alert classifier failed: {exc}"))
+            logger.exception("Alert classifier failed on session %s", session_id)
+            self._publish(ErrorEvent(session_id, f"The alert classifier failed: {exc or exc.__class__.__name__}"))
             return
         self._publish(DecisionEvent(session_id, window.start_ms, window.end_ms, result))
         if not result.worth_reporting:
             stream.release_hold(hold_ms)
             return
-        task = asyncio.create_task(self._commit_alert(session_id, stream, window, result, hold_ms))
-        self._commits.add(task)
-        task.add_done_callback(self._commits.discard)
+        self._track(session_id, asyncio.create_task(self._commit_alert(session_id, stream, window, result, hold_ms)))
 
     async def _commit_alert(
         self,
@@ -647,3 +730,11 @@ def _normalizer(config: AppConfig):
 
     return FrameNormalizer(config.max_frame_width)
 
+
+def _thin(frames: tuple[FramePacket, ...], min_interval_ms: int) -> tuple[FramePacket, ...]:
+    """Keep frames at least `min_interval_ms` apart (the classifier clip does not need full fps)."""
+    kept: list[FramePacket] = []
+    for frame in frames:
+        if not kept or frame.timestamp_ms - kept[-1].timestamp_ms >= min_interval_ms - 2:
+            kept.append(frame)
+    return tuple(kept)

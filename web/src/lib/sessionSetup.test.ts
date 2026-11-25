@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { SUMMARY_INTERVALS, formatInterval, formatIntervalShort, intervalAt, intervalIndex, llmPayload } from "./sessionSetup";
+import {
+  SUMMARY_INTERVALS,
+  VIDEO_ACCEPT,
+  formatInterval,
+  formatIntervalShort,
+  intervalAt,
+  intervalIndex,
+  llmPayload,
+} from "./sessionSetup";
 
 describe("session setup", () => {
   it("offers 1 minute, then every 5 minutes up to 60", () => {
@@ -31,5 +39,12 @@ describe("session setup", () => {
     const off = llmPayload({ enabled: false, summaryIntervalMinutes: 30, detailedAlerts: true, advancedAnalytics: true });
     expect(off.detailed_alerts).toBe(false);
     expect(off.advanced_analytics).toBe(false);
+  });
+});
+
+describe("video file picker", () => {
+  it("lists .mov and other containers in both cases", () => {
+    for (const ext of [".mov", ".MOV", ".mp4", ".MP4", ".webm"]) expect(VIDEO_ACCEPT.split(",")).toContain(ext);
+    expect(VIDEO_ACCEPT.startsWith("video/*")).toBe(true);
   });
 });

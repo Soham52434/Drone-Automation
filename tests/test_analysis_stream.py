@@ -319,5 +319,6 @@ def test_upload_indexes_readings_with_classes_scene_and_alerts(tmp_path, config:
     assert [c["name"] for c in observation["classes"]] == ["person", "structure"]
     assert "telemetry" not in observation and observation["location"] == "driveway"
     assert frames.total > 0 and frames.frames[0].scene == "driveway" and frames.frames[0].minute_label == "00:00"
-    assert alerts.total == 1 and alerts.frames[0].alert_rule == "person_on_property"
-    assert classes["person"].alerts == 1
+    # 0–10 s alerts, and the last 2 s (the window still open when the video ends) is judged too.
+    assert alerts.total == 2 and {f.alert_rule for f in alerts.frames} == {"person_on_property"}
+    assert classes["person"].alerts == 2

@@ -69,3 +69,6 @@ export function llmPayload(llm: LlmSettings): {
     advanced_analytics: llm.enabled && llm.advancedAnalytics,
   };
 }
+
+/** File-picker filter. Extensions are listed too (both cases): file choosers often miss `.MOV` under `video/*`. */
+export const VIDEO_ACCEPT = ["video/*", ...["mp4", "mov", "m4v", "webm", "mkv", "avi"].flatMap((ext) => [`.${ext}`, `.${ext.toUpperCase()}`])].join(",");

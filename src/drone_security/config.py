@@ -18,6 +18,8 @@ class AppConfig:
     max_frame_width: int = 640
     ice_servers: tuple[str, ...] = ()
     decision_window_seconds: float = 10.0
+    # Frames per second in the clip sent to the alert classifier (enough to see motion).
+    decision_clip_fps: float = 5.0
     # Predefined time rules: alert on people/vehicles after hours, and on people loitering.
     after_hours: str = "22:00-06:00"
     loiter_seconds: float = 60.0
@@ -41,7 +43,7 @@ class AppConfig:
             raise ValueError(f"decision window {self.decision_window_seconds}s exceeds {MAX_DECISION_WINDOW_SECONDS}s")
         if self.decision_window_seconds > self.buffer_seconds:
             raise ValueError(f"decision window {self.decision_window_seconds}s exceeds ring buffer {self.buffer_seconds}s")
-        if self.max_buffer_fps <= 0 or self.max_frame_width <= 0 or self.vision_sample_ms <= 0:
+        if self.max_buffer_fps <= 0 or self.max_frame_width <= 0 or self.vision_sample_ms <= 0 or self.decision_clip_fps <= 0:
             raise ValueError("max_buffer_fps, max_frame_width, and vision_sample_ms must be positive")
         if not 0.0 < self.alert_noul_threshold < 0.99:
             raise ValueError("alert_noul_threshold must be between 0 and 0.99")

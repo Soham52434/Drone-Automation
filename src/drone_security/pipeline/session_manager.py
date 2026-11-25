@@ -135,6 +135,11 @@ class SessionManager:
             with source.open("wb") as out:
                 shutil.copyfileobj(data, out)
             info = VideoFileSource(source, self._normalizer).probe()
+            if info.truncated:
+                raise VideoFileError(
+                    f"This video file is incomplete: it holds {_clock(info.playable_ms or 0)} of video, but its header "
+                    f"says {_clock(info.duration_ms)}. The download or copy was probably cut off; download it again."
+                )
         except VideoFileError:
             self._store.delete(session.id)
             shutil.rmtree(session_dir, ignore_errors=True)
@@ -366,3 +371,8 @@ class SessionManager:
     @staticmethod
     def _default_live_title() -> str:
         return f"Live {time.strftime('%b %d, %H:%M')}"
+
+
+def _clock(ms: int) -> str:
+    seconds = round(ms / 1000)
+    return f"{seconds // 60}:{seconds % 60:02d}"

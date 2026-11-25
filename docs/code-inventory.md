@@ -25,7 +25,7 @@
 
 | Name | Module | Fields (summary) | Used by |
 |------|--------|------------------|---------|
-| `AppConfig` | `config` | `data_dir`, `buffer_seconds`=15, `clip_pre_seconds`=8, `clip_post_seconds`=2, `alert_cooldown_seconds`=10, `max_buffer_fps`=15, `max_frame_width`=640, `ice_servers`, `decision_window_seconds`=10, `after_hours`=`22:00-06:00`, `loiter_seconds`=60, `time_rules()`, `vision_sample_ms`=250 (test playhead step only; production follows the wall clock), `alert_noul_threshold`=0.6, `decision_model`, `summary_model`, `chat_model` (same default; comma-separated fallback chains allowed), `llm_api_key`, `vision_dir`; paths `db_path`, `usage_path`, `graph_path`, `sessions_dir`, `session_dir()`, `chunk_dir()`, `summary_dir()`, `resolved_vision_dir`; `from_env()` | everything |
+| `AppConfig` | `config` | `data_dir`, `buffer_seconds`=15, `clip_pre_seconds`=8, `clip_post_seconds`=2, `alert_cooldown_seconds`=10, `max_buffer_fps`=15, `max_frame_width`=640, `ice_servers`, `decision_window_seconds`=10, `decision_clip_fps`=5, `after_hours`=`22:00-06:00`, `loiter_seconds`=60, `time_rules()`, `vision_sample_ms`=250 (test playhead step only; production follows the wall clock), `alert_noul_threshold`=0.6, `decision_model`, `summary_model`, `chat_model` (same default; comma-separated fallback chains allowed), `llm_api_key`, `vision_dir`; paths `db_path`, `usage_path`, `graph_path`, `sessions_dir`, `session_dir()`, `chunk_dir()`, `summary_dir()`, `resolved_vision_dir`; `from_env()` | everything |
 | `SceneObservation` | `models.perception` | `timestamp_ms`, `frame_index`, `event_detected`, `label`, `confidence`, `summary`, `raw` (parsed record without masks), `classes`, `scene`; `class_names`, `location` (The vision model's scene), `to_dict()` | vision model, hourly log, the alert classifier, graph index, SSE |
 | `ClassHit` | `models.perception` | `name`, `score`, `count`; `to_dict()` | perception graph → everything downstream |
 | `TaggedReading`, `ClassActivity`, `SessionTelemetry` | `models.telemetry` | A reading's class tags (+ scene, summary, alert); per-class frames, first/last seen, best/avg score, alerts, presence spans; the session report with the newest-first log | graph → builder → `/telemetry` → Telemetry tab |
@@ -54,7 +54,7 @@
 | `LlmSummary` | `models.summaries` | kind, span, `status` (`ok`/`quiet`/`failed`), `text`, `model`, `attempts`, `evidence`, `alert_key`, `frames` (keyframes seen); `file_name`, `to_dict`, `from_dict` | Summary graph → archive → API/SSE |
 | `FramePacket` | `models.frames` | `timestamp_ms`, `frame_index`, `image` (RGB ndarray); `width`, `height` | ingest, pipeline, writer |
 | `BufferStats` | `models.frames` | `frames_received`, `frames_buffered`, `buffered_seconds`, `latest_timestamp_ms` | `StreamSession`, API |
-| `VideoInfo` | `models.frames` | `duration_ms`, `width`, `height`, `fps` | `VideoFileSource` |
+| `VideoInfo` | `models.frames` | `duration_ms` (header), `width`, `height`, `fps`, `playable_ms` (last packet actually in the file), `truncated` | `VideoFileSource` |
 | `ChunkTrigger` | `models.chunks` | `MANUAL`, `ALERT` | pipeline, writer, store |
 | `ClipPlan` | `models.chunks` | `session_id`, `trigger`, `detection_ms`, `frames`; `start_ms`, `end_ms` | `StreamSession` → `ChunkWriter` |
 | `ChunkArtifact` | `models.chunks` | `session_id`, `chunk_file`, `metadata_file`, `chunk_start_ms`, `chunk_end_ms`, `detection_ms`, `frame_count`, `fps`, `trigger`, `created_ms`; `seek_offset_sec`, `duration_sec`, `to_metadata()` | writer, store, API |
@@ -66,16 +66,17 @@
 |------|--------|----------------|-------|
 | `RingBuffer` | `ingest.ring_buffer` | `push`, `window(start_ms, end_ms)`, `clear`, `latest_timestamp_ms`, `buffered_seconds`, `__len__` | Time-based eviction, thread-safe |
 | `FrameNormalizer` | `ingest.frame_normalizer` | `target_size(w, h)`, `normalize(frame, ts, index)` | RGB, even dims, max width |
-| `VideoFileSource` | `ingest.video_file` | `probe() -> VideoInfo`, `frames(start_ms, end_ms)`, `frame_at(media_ms)`, `window_frames(start, end, min_interval_ms)` | `frame_at` is the frame on screen at that moment |
+| `VideoFileSource` | `ingest.video_file` | `probe() -> VideoInfo`, `frames(start_ms, end_ms, min_interval_ms=0)`, `frame_at(media_ms)`, `playback() -> PlaybackReader`, `window_frames(start, end, min_interval_ms)` | Frames are thinned before conversion; multithreaded decoding |
+| `PlaybackReader` | `ingest.video_file` | `frame_at(media_ms)`, `close()`; context manager | `exhausted` once the data runs out. Forward reader for a moving playhead: decoder stays open, keyframe index (packet headers) lets it jump instead of decoding everything, only the returned frame is converted |
 | `LiveFeed` | `ingest.webrtc` | `connect(offer) -> SdpMessage`, `close()` | aiortc peer; idempotent close; calls `on_ended` once |
 | `ChunkWriter` | `indexing.chunk_writer` | `write(plan, out_dir) -> ChunkArtifact`, `encode_mp4(frames, path)` | H.264 mp4 (ms timebase, faststart) + paired json; `_2`, `_3` suffix on name collision. `encode_mp4` is the decision-window clip and writes no sidecar |
 | `SessionStore` | `indexing.session_store` | `on_change(listener)`, `create(..., watch_brief=None, llm=None)`, `get`, `list_sessions`, `update`, `set_status`, `delete`, `add_chunk`, `list_chunks`, `close` | SQLite, chunks cascade on delete; adds `watch_brief` and LLM columns on older databases |
 | `CommitDebouncer` | `pipeline.stream_session` | `try_acquire(trigger, detection_ms)` | ALERT cooldown; MANUAL always passes |
 | `StreamSession` | `pipeline.stream_session` | `ingest(packet) -> bool`, `hold_from(start_ms)`, `release_hold(start_ms)`, `plan_clip(trigger, detection_ms)`, `frames_between(start, end)`, `has_post_roll`, `post_roll_ms`, `latest_timestamp_ms`, `stats()` | 15 s ring plus a pin for the open alert timeframe. Clip = detection −8 s / +2 s |
-| `StreamAnalyzer` | `pipeline.analyzer` | `open_window(timestamp_ms)`, `record(observation)`, `close_ready(timestamp_ms)`, `window_start` | Closes a 10 s window from the frames the vision model actually saw |
+| `StreamAnalyzer` | `pipeline.analyzer` | `open_window(timestamp_ms)`, `record(observation)`, `close_ready(timestamp_ms)`, `close_remaining(end_ms)` (the window open at the end), `window_start` | Closes a 10 s window from the frames the vision model actually saw |
 | `LatestFrame` | `pipeline.latest_frame` | `offer(packet)`, `stop()`, `stopped`, `next_unseen()` | Live camera: only the newest frame is inferred |
 | `WallClock`, `StepClock` | `pipeline.playhead` | `now_ms()`; `StepClock.advance()` | Upload playhead. Wall clock in production; fixed jumps in tests |
-| `SessionAnalysis` | `pipeline.analysis` | `bind_live(session, stream)`, `finish_live`, `iter_events`, `cancel`, `shutdown` | The next vision-model frame is the live/playhead frame when inference finishes; publishes SSE. Attaches telemetry, writes every reading and alert to the graph index. With LLM on: period summaries in the background, alert write-ups, dead-hand final summary last |
+| `SessionAnalysis` | `pipeline.analysis` | `bind_live(session, stream)`, `finish_live`, `iter_events`, `cancel`, `shutdown` | The next vision-model frame is the live/playhead frame when inference finishes; publishes SSE. Attaches telemetry, writes every reading and alert to the graph index. With LLM on: period summaries in the background, alert write-ups, dead-hand final summary last. Decisions run in a per-session background queue (in window order) so perception never waits; the window open at the end is judged; disk write errors are reported, not fatal; low-disk warning at start |
 | `SessionChangeFeed` | `pipeline.session_changes` | `notify()` (any thread), `subscribe()` → "changed" / "ping", `close()`, `subscribers` | Pushes session-list changes; bursts coalesce; 25 s keep-alive |
 | `PresenceTracker`, `window_context`, `scene_daypart` | `pipeline.presence` | `record`, `dwell(at_ms)`; build a window's context (clock for live, the scene reading for uploads) | Time rules |
 | `SummaryScheduler` | `pipeline.summary_schedule` | `advance(timestamp_ms) -> closed periods`, `first_ms`, `last_ms`, `period_start` | Every N minutes from the first frame |
@@ -209,7 +210,7 @@
 | `tests/test_video_file.py` | Probe, ranged frames, invalid file, `frame_at` |
 | `tests/test_session_manager.py` | Upload lifecycle, clip saving (incl. alert clip after the feed stops), rollback, traversal guard, restart cleanup |
 | `tests/test_live_webrtc.py` | Real aiortc loopback: stream → buffer → clip → stop |
-| `tests/test_api.py` | HTTP endpoints, range requests, error codes, LLM settings validation, summaries endpoint |
+| `tests/test_api.py` | HTTP endpoints, .MOV upload served as MP4, range requests, error codes, LLM settings validation, summaries endpoint |
 | `tests/test_perception_mapping.py` | Vision-model JSON → `SceneObservation`, including a quiet frame |
 | `tests/test_vision_model.py` | Describe options; observe before load fails |
 | `tests/test_decision_graph.py` | Alert, clear, `none` rule, missing API key, video block |
@@ -225,6 +226,7 @@
 | `tests/test_session_changes.py` | Change feed: snapshot tick, cross-thread notify, burst coalescing, keep-alive, close; store change hook; stream route snapshot |
 | `tests/test_live_stats_push.py` | Live stats pushed as events, never replayed; ticker stops on shutdown |
 | `tests/test_assignment_examples.py` | The brief's examples: alert triggered at midnight, person loitering (unit + end to end), truck logged correctly; rule wrap-around, brief scoping, presence gaps, upload night from the scene, evidence text |
+| `tests/test_playback.py` | Cut-off files detected and rejected at upload with a clear message; forward reader matches fresh seeks, repeat reads, keyframe jumps, thinned decision clip, last window judged at the end, slow decisions do not stall readings, a full disk does not stop the session |
 | `tests/test_cost.py` | Prices, metering (tokens, failures, session), classifier usage, totals by job/model with quotas, Pacific-day reset, `/cost` route end to end with attribution |
 | `tests/test_advanced_analytics.py` | Visits and signatures, describer normalisation and failure, sightings in graph and telemetry log, "blue F150 entered twice" via LLM and word match, option off routes to frame search, end-to-end describing on an upload |
 | `tests/test_llm.py` | Model chains, single vs fallback client, which model answered, busy first model hands over |

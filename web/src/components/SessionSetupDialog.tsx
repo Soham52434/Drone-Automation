@@ -10,6 +10,7 @@ import {
   formatInterval,
   intervalAt,
   intervalIndex,
+  VIDEO_ACCEPT,
 } from "../lib/sessionSetup";
 
 export type SetupMode = "live" | "upload";
@@ -84,7 +85,7 @@ export function SessionSetupDialog({ mode, initialFile, busy, onCancel, onStart 
               <input
                 ref={fileInput}
                 type="file"
-                accept="video/*"
+                accept={VIDEO_ACCEPT}
                 hidden
                 onChange={(event) => {
                   const picked = event.target.files?.[0];

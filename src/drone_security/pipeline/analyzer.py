@@ -29,6 +29,19 @@ class StreamAnalyzer:
     def record(self, observation: SceneObservation) -> None:
         self._observations.append(observation)
 
+    def close_remaining(self, end_ms: int) -> DecisionWindow | None:
+        """At the end of a video or feed: the open window up to `end_ms`, if it holds any readings."""
+        if self._window_start is None or not self._observations:
+            return None
+        start = self._window_start
+        end = max(start, min(end_ms, start + self._window_ms))
+        chosen = tuple(o for o in self._observations if start <= o.timestamp_ms <= end)
+        self._observations = []
+        self._window_start = None
+        if not chosen:
+            return None
+        return DecisionWindow(session_id=self.session_id, start_ms=start, end_ms=end, observations=chosen)
+
     def close_ready(self, timestamp_ms: int) -> DecisionWindow | None:
         """Close one window when the timeline has covered it. Empty windows are still returned."""
         if self._window_start is None:
